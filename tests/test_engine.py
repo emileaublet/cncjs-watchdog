@@ -101,3 +101,77 @@ def test_controller_state_records_movement():
     assert eng.machine_state == "Run"
     assert eng.last_move == clock.t
     assert eng.last_pos == (1.0, 2.0, 0.0)
+
+
+def run_job(eng):
+    connect(eng)
+    eng.handle_frame('42["sender:status",{"sent":10,"total":5000}]')
+    eng.handle_frame('42["workflow:state","running"]')
+
+
+def test_no_stall_before_threshold():
+    eng, sent, clock = make_engine()
+    run_job(eng)
+    sent.clear()
+    clock.advance(4)          # < stall_secs (5)
+    eng.tick()
+    assert sent == []
+    assert eng.state == State.RUNNING
+
+
+def test_stall_emits_pause_then_resume_and_confirms():
+    eng, sent, clock = make_engine()
+    run_job(eng)
+    sent.clear()
+
+    clock.advance(5)          # reach stall threshold
+    eng.tick()
+    assert sent == ['42["command","/dev/ttyACM0","gcode:pause"]']
+    assert eng.state == State.RECOVERING
+    assert eng.recovery_attempts == 1
+
+    clock.advance(2)          # hold_secs elapsed -> resume
+    eng.tick()
+    assert sent[-1] == '42["command","/dev/ttyACM0","gcode:resume"]'
+    assert eng.await_confirm is True
+
+    recovered = []
+    eng.on_stall_recovered = recovered.append
+    # motion resumes
+    eng.handle_frame('42["controller:state","Grbl",{"status":{"activeState":"Run","mpos":{"x":1,"y":0,"z":0}}}]')
+    assert recovered == [1]
+    assert eng.recovering is False
+    assert eng.state == State.RUNNING
+
+
+def test_recovery_rearms_if_motion_never_resumes():
+    eng, sent, clock = make_engine()
+    run_job(eng)
+    sent.clear()
+    clock.advance(5)
+    eng.tick()                # pause
+    clock.advance(2)
+    eng.tick()                # resume, await_confirm
+    clock.advance(2)          # confirm_secs elapsed, no motion
+    eng.tick()                # re-arm
+    assert eng.recovering is False
+    assert eng.await_confirm is False
+    # next stall triggers a second cycle
+    clock.advance(5)
+    eng.tick()
+    assert eng.recovery_attempts == 2
+
+
+def test_stall_at_end_of_job_finishes_instead_of_recovering():
+    eng, sent, clock = make_engine()
+    connect(eng)
+    eng.handle_frame('42["sender:status",{"sent":5000,"total":5000}]')
+    eng.handle_frame('42["workflow:state","running"]')
+    sent.clear()
+    done = []
+    eng.on_job_finished = lambda r, s, t: done.append(r)
+    clock.advance(5)
+    eng.tick()
+    assert done == ["complete"]
+    assert sent == []          # no pause/resume — nothing left to kick
+    assert eng.state == State.IDLE

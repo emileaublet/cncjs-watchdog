@@ -86,7 +86,7 @@ class WatchdogEngine:
             self._send(frame)
 
     def _emit(self, event, *args):
-        self._raw("42" + json.dumps([event, *args]))
+        self._raw("42" + json.dumps([event, *args], separators=(',', ':')))
 
     # connection lifecycle (called by transport)
     def mark_connected(self):
@@ -184,3 +184,54 @@ class WatchdogEngine:
         self.recovering = False
         self.resume_sent = False
         self.await_confirm = False
+
+    # stall detection (called ~1/s by transport; pure given the clock)
+    def _job_finished_by_lines(self):
+        # total is 0 until the first sender:status; never "done" before then.
+        return self.total > 0 and self.sent >= self.total - self.cfg.done_lines
+
+    def _begin_recovery(self, now):
+        self.recovery_attempts += 1
+        self.recovering = True
+        self.resume_sent = False
+        self.await_confirm = False
+        self.recover_started = now
+        self.last_move = now
+        self._emit("command", self.cfg.serial_port, "gcode:pause")
+        self._recompute_state()
+
+    def tick(self):
+        now = self._clock()
+        if not self.connected:
+            return
+
+        if self.recovering:
+            if not self.resume_sent and (now - self.recover_started) >= self.cfg.hold_secs:
+                self._emit("command", self.cfg.serial_port, "gcode:resume")
+                self.resume_sent = True
+                self.await_confirm = True
+                self.resume_at = now
+                self.last_move = now
+            elif self.resume_sent and self.await_confirm and \
+                    (now - self.resume_at) >= self.cfg.confirm_secs:
+                # motion never came back -> re-arm so the next stall re-triggers
+                self.recovering = False
+                self.await_confirm = False
+                self.last_move = now
+                self._recompute_state()
+            return
+
+        if self.workflow_state != "running":
+            self.last_move = now
+            return
+
+        if (now - self.last_move) >= self.cfg.stall_secs:
+            if self._job_finished_by_lines():
+                # CNCjs never flipped workflow back to idle, but every line is
+                # fed -> treat as complete instead of looping pause/resume forever.
+                self.job_active = False
+                self.workflow_state = "idle"
+                self.on_job_finished("complete", self.sent, self.total)
+                self._recompute_state()
+                return
+            self._begin_recovery(now)
