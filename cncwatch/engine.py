@@ -1,10 +1,35 @@
 import json
+import logging
+import os
 import threading
 import time
 from enum import Enum
+from logging.handlers import RotatingFileHandler
 
 import jwt
 import websocket
+
+log = logging.getLogger("cncwatch")
+
+
+def setup_logging(path=None):
+    """Configure the 'cncwatch' logger with a rotating file handler + console.
+    Idempotent: re-clears handlers so repeated calls don't duplicate output."""
+    from .config import LOG_FILE
+    path = path or LOG_FILE
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    log.setLevel(logging.INFO)
+    for h in list(log.handlers):
+        log.removeHandler(h)
+    fmt = logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s",
+                            datefmt="%Y-%m-%d %H:%M:%S")
+    fileh = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=3)
+    fileh.setFormatter(fmt)
+    log.addHandler(fileh)
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    log.addHandler(console)
+    return log
 
 
 class State(Enum):
@@ -95,12 +120,14 @@ class WatchdogEngine:
         if not self.connected:
             self.connected = True
             self.on_connected()
+            log.info("connected to %s:%d", self.cfg.host, self.cfg.port)
         self._recompute_state()
 
     def mark_disconnected(self):
         if self.connected:
             self.connected = False
             self.on_disconnected()
+            log.warning("disconnected from %s:%d", self.cfg.host, self.cfg.port)
         self.connected = False
         self._recompute_state()
 
@@ -156,12 +183,14 @@ class WatchdogEngine:
             self.recovery_attempts = 0
             self.stalls_recovered = 0
             self._reset_recovery()
+            log.info("job started")
         # running -> idle means the drawing ended (finished or stopped). A pause
         # is running -> "paused", so this branch won't fire on an intentional hold.
         if new == "idle" and self.job_active:
             self.job_active = False
             done = bool(self.total) and self.sent >= self.total
             self.on_job_finished("complete" if done else "stopped", self.sent, self.total)
+            log.info("job finished (%s) — %d/%d lines", "complete" if done else "stopped", self.sent, self.total)
         self.workflow_state = new
         self._recompute_state()
 
@@ -180,6 +209,7 @@ class WatchdogEngine:
                     self.recovering = False
                     self.stalls_recovered += 1
                     self.on_stall_recovered(self.stalls_recovered)
+                    log.info("stall recovered (#%d) — motion resumed", self.stalls_recovered)
                     self._recompute_state()
 
     def _reset_recovery(self):
@@ -200,6 +230,7 @@ class WatchdogEngine:
         self.recover_started = now
         self.last_move = now
         self._emit("command", self.cfg.serial_port, "gcode:pause")
+        log.warning("stall detected — pausing sender (attempt #%d)", self.recovery_attempts)
         self._recompute_state()
 
     def tick(self):
@@ -234,6 +265,7 @@ class WatchdogEngine:
                 self.job_active = False
                 self.workflow_state = "idle"
                 self.on_job_finished("complete", self.sent, self.total)
+                log.info("job complete by line count — %d/%d", self.sent, self.total)
                 self._recompute_state()
                 return
             self._begin_recovery(now)
@@ -256,9 +288,16 @@ class WatchdogEngine:
                 self._raw("2")
 
     def _stall_loop(self, stop_event):
+        last_heartbeat = time.time()
         while not stop_event.is_set():
             time.sleep(1)
             self.tick()
+            now = time.time()
+            if self.workflow_state == "running" and \
+                    now - last_heartbeat >= self.cfg.heartbeat_secs:
+                last_heartbeat = now
+                log.info("watching — machine=%s, %.1fs since last move",
+                         self.machine_state, now - self.last_move)
 
     def run_forever(self, stop_event):
         """Maintain a connection forever. Reconnects every 5s when the Pi is

@@ -7,7 +7,7 @@ import threading
 import rumps
 
 from .config import load_config, LOG_FILE
-from .engine import WatchdogEngine, State
+from .engine import WatchdogEngine, State, setup_logging
 from .notifications import Notifier
 from . import login_item
 
@@ -33,6 +33,7 @@ def _login_program_args():
 class WatchdogApp(rumps.App):
     def __init__(self):
         super().__init__("⚪ CNC", quit_button=None)
+        setup_logging()
         self.cfg = load_config()
         self.notifier = Notifier()
         self.events = queue.Queue()

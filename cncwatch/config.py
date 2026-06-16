@@ -3,8 +3,7 @@ import os
 from dataclasses import dataclass, fields
 
 CONFIG_PATH = os.path.expanduser("~/.cncjs-watchdog.json")
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cncjs_watchdog.log")
-LOG_FILE = os.path.abspath(LOG_FILE)
+LOG_FILE = os.path.expanduser("~/Library/Logs/cncjs-watchdog.log")
 
 
 @dataclass
