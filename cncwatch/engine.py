@@ -164,7 +164,18 @@ class WatchdogEngine:
 
     # event dispatch
     def _handle_event(self, event, args):
-        if event == "controller:state":
+        if event == "startup":
+            # CNCjs only broadcasts controller:state / workflow:state /
+            # sender:status to sockets that have JOINED a port via "open".
+            # This is a non-disruptive subscribe — if the web UI already has
+            # the port open, CNCjs reuses that connection and just adds us as
+            # a listener; it does not restart the port or start/stop jobs.
+            log.info("CNCjs ready — subscribing to %s", self.cfg.serial_port)
+            self._emit("open", self.cfg.serial_port, {
+                "controllerType": self.cfg.controller_type,
+                "baudrate": self.cfg.baud,
+            })
+        elif event == "controller:state":
             # ["controller:state", <controllerType>, <state>]
             state = args[1] if len(args) > 1 else (args[0] if args else {})
             self._handle_state(state)

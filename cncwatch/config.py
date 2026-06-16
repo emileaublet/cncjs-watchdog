@@ -12,6 +12,7 @@ class Config:
     port: int = 8000
     serial_port: str = "/dev/ttyACM0"
     baud: int = 115200
+    controller_type: str = "Grbl"
     secret: str = "$2a$10$EXZGL.UpR1K2z1DQuFJRpe"
     stall_secs: float = 5.0
     hold_secs: float = 2.0
