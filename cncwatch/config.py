@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 
 CONFIG_PATH = os.path.expanduser("~/.cncjs-watchdog.json")
 LOG_FILE = os.path.expanduser("~/Library/Logs/cncjs-watchdog.log")
@@ -28,3 +28,23 @@ def load_config(path=CONFIG_PATH):
         data = json.load(f)
     known = {fld.name for fld in fields(Config)}
     return Config(**{k: v for k, v in data.items() if k in known})
+
+
+def save_config(cfg, path=CONFIG_PATH):
+    """Write every field of `cfg` to `path` as pretty JSON. The file holds the
+    CNCjs secret, so restrict it to the owner (0600)."""
+    with open(path, "w") as f:
+        json.dump(asdict(cfg), f, indent=2)
+        f.write("\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def ensure_config_file(path=CONFIG_PATH):
+    """Make sure a config file exists, pre-filled with the current effective
+    config (defaults merged with any existing file). Returns the path."""
+    save_config(load_config(path), path)
+    return path

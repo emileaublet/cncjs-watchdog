@@ -6,7 +6,7 @@ import threading
 
 import rumps
 
-from .config import load_config, LOG_FILE
+from .config import load_config, ensure_config_file, CONFIG_PATH, LOG_FILE
 from .engine import WatchdogEngine, State, setup_logging
 from .notifications import Notifier
 from . import login_item
@@ -50,6 +50,8 @@ class WatchdogApp(rumps.App):
             self.status_item,
             self.recovered_item,
             None,
+            rumps.MenuItem("Edit config…", callback=self._edit_config),
+            rumps.MenuItem("Reload config", callback=self._reload_config),
             rumps.MenuItem("Open log", callback=self._open_log),
             self.login_btn,
             None,
@@ -111,6 +113,18 @@ class WatchdogApp(rumps.App):
             self.notifier.send("CNCjs Watchdog", "Job finished", msg)
 
     # menu actions
+    def _edit_config(self, _sender):
+        # Pre-fill the file with every current value (incl. secret) on first
+        # use, then open it in the default text editor. "Reload config" applies.
+        ensure_config_file()
+        subprocess.run(["open", "-t", CONFIG_PATH], check=False)
+
+    def _reload_config(self, _sender):
+        self.cfg = load_config()
+        self.engine.reload(self.cfg)
+        self.notifier.send("CNCjs Watchdog", "Config reloaded",
+                           "Thresholds applied; reconnecting with new settings")
+
     def _open_log(self, _sender):
         subprocess.run(["open", LOG_FILE], check=False)
 

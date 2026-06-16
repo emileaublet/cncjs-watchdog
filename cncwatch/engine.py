@@ -315,10 +315,13 @@ class WatchdogEngine:
         unreachable; the stall loop and ping loop run for the whole lifetime."""
         threading.Thread(target=self._ping_loop, args=(stop_event,), daemon=True).start()
         threading.Thread(target=self._stall_loop, args=(stop_event,), daemon=True).start()
-        token = make_token(self.cfg.secret)
-        url = (f"ws://{self.cfg.host}:{self.cfg.port}"
-               f"/socket.io/?transport=websocket&token={token}")
         while not stop_event.is_set():
+            # Build URL/token from the CURRENT config each connection, so a
+            # live config reload (which closes the socket) reconnects with the
+            # new host/port/secret.
+            token = make_token(self.cfg.secret)
+            url = (f"ws://{self.cfg.host}:{self.cfg.port}"
+                   f"/socket.io/?transport=websocket&token={token}")
             ws = websocket.WebSocketApp(
                 url,
                 on_open=self._on_ws_open,
@@ -326,8 +329,23 @@ class WatchdogEngine:
                 on_error=lambda _w, _e: None,
                 on_close=lambda _w, _c, _m: self.mark_disconnected(),
             )
+            self._ws = ws
             ws.run_forever()
             self.mark_disconnected()
             if stop_event.is_set():
                 break
             time.sleep(5)
+
+    def reload(self, new_cfg):
+        """Apply a new Config to the running engine. Threshold/serial settings
+        take effect on the next tick; connection settings (host/port/secret/
+        baud) take effect by forcing a reconnect, which also re-subscribes via
+        'open' on the next startup."""
+        self.cfg = new_cfg
+        log.info("config reloaded")
+        ws = getattr(self, "_ws", None)
+        if ws is not None:
+            try:
+                ws.close()   # triggers reconnect with the new config
+            except Exception:
+                pass
