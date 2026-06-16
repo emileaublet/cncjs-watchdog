@@ -162,6 +162,33 @@ def test_recovery_rearms_if_motion_never_resumes():
     assert eng.recovery_attempts == 2
 
 
+def test_reload_swaps_config_and_forces_reconnect():
+    eng, _, _ = make_engine()
+    closed = []
+
+    class FakeWS:
+        def close(self):
+            closed.append(True)
+
+    eng._ws = FakeWS()
+    new = Config(host="9.9.9.9", stall_secs=12.0)
+    eng.reload(new)
+    assert eng.cfg is new
+    assert eng.cfg.stall_secs == 12.0
+    assert closed == [True]   # socket closed -> run_forever reconnects with new cfg
+
+
+def test_startup_subscribes_by_opening_port():
+    # CNCjs only sends controller:state/workflow:state/sender:status to sockets
+    # that have joined the port via "open". Without this, the watchdog is deaf
+    # to a running job. "open" on an already-open port is a non-disruptive join.
+    eng, sent, _ = make_engine()
+    eng.handle_frame('0{}')
+    sent.clear()
+    eng.handle_frame('42["startup",{}]')
+    assert sent == ['42["open","/dev/ttyACM0",{"controllerType":"Grbl","baudrate":115200}]']
+
+
 def test_stall_at_end_of_job_finishes_instead_of_recovering():
     eng, sent, clock = make_engine()
     connect(eng)

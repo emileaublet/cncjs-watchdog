@@ -164,7 +164,18 @@ class WatchdogEngine:
 
     # event dispatch
     def _handle_event(self, event, args):
-        if event == "controller:state":
+        if event == "startup":
+            # CNCjs only broadcasts controller:state / workflow:state /
+            # sender:status to sockets that have JOINED a port via "open".
+            # This is a non-disruptive subscribe — if the web UI already has
+            # the port open, CNCjs reuses that connection and just adds us as
+            # a listener; it does not restart the port or start/stop jobs.
+            log.info("CNCjs ready — subscribing to %s", self.cfg.serial_port)
+            self._emit("open", self.cfg.serial_port, {
+                "controllerType": self.cfg.controller_type,
+                "baudrate": self.cfg.baud,
+            })
+        elif event == "controller:state":
             # ["controller:state", <controllerType>, <state>]
             state = args[1] if len(args) > 1 else (args[0] if args else {})
             self._handle_state(state)
@@ -304,10 +315,13 @@ class WatchdogEngine:
         unreachable; the stall loop and ping loop run for the whole lifetime."""
         threading.Thread(target=self._ping_loop, args=(stop_event,), daemon=True).start()
         threading.Thread(target=self._stall_loop, args=(stop_event,), daemon=True).start()
-        token = make_token(self.cfg.secret)
-        url = (f"ws://{self.cfg.host}:{self.cfg.port}"
-               f"/socket.io/?transport=websocket&token={token}")
         while not stop_event.is_set():
+            # Build URL/token from the CURRENT config each connection, so a
+            # live config reload (which closes the socket) reconnects with the
+            # new host/port/secret.
+            token = make_token(self.cfg.secret)
+            url = (f"ws://{self.cfg.host}:{self.cfg.port}"
+                   f"/socket.io/?transport=websocket&token={token}")
             ws = websocket.WebSocketApp(
                 url,
                 on_open=self._on_ws_open,
@@ -315,8 +329,23 @@ class WatchdogEngine:
                 on_error=lambda _w, _e: None,
                 on_close=lambda _w, _c, _m: self.mark_disconnected(),
             )
+            self._ws = ws
             ws.run_forever()
             self.mark_disconnected()
             if stop_event.is_set():
                 break
             time.sleep(5)
+
+    def reload(self, new_cfg):
+        """Apply a new Config to the running engine. Threshold/serial settings
+        take effect on the next tick; connection settings (host/port/secret/
+        baud) take effect by forcing a reconnect, which also re-subscribes via
+        'open' on the next startup."""
+        self.cfg = new_cfg
+        log.info("config reloaded")
+        ws = getattr(self, "_ws", None)
+        if ws is not None:
+            try:
+                ws.close()   # triggers reconnect with the new config
+            except Exception:
+                pass
