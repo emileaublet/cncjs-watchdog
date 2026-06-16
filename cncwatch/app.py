@@ -21,6 +21,14 @@ DOTS = {
 }
 
 
+def format_title(state, sent, total):
+    """Menu bar title: show job % while running/recovering, else the dot + CNC."""
+    dot = DOTS.get(state, "⚪")
+    if state in (State.RUNNING, State.RECOVERING) and total > 0:
+        return f"{dot} {int(sent / total * 100)}%"
+    return f"{dot} CNC"
+
+
 def _login_program_args():
     """How launchd should relaunch us. When frozen into a .app bundle, open the
     bundle; in dev, re-run this module with the same interpreter."""
@@ -80,7 +88,7 @@ class WatchdogApp(rumps.App):
                 break
             self._handle_event(ev)
         st = self.engine.state
-        self.title = f"{DOTS.get(st, '⚪')} CNC"
+        self.title = format_title(st, self.engine.sent, self.engine.total)
         self.status_item.title = self._status_text(st)
         self.recovered_item.title = f"Stalls recovered: {self.engine.stalls_recovered}"
 
