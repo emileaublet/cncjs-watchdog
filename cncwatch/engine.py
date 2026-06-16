@@ -1,8 +1,10 @@
 import json
+import threading
 import time
 from enum import Enum
 
 import jwt
+import websocket
 
 
 class State(Enum):
@@ -235,3 +237,47 @@ class WatchdogEngine:
                 self._recompute_state()
                 return
             self._begin_recovery(now)
+
+    # websocket transport
+    def _on_ws_open(self, ws):
+        self._send = lambda frame: self._safe_send(ws, frame)
+
+    @staticmethod
+    def _safe_send(ws, frame):
+        try:
+            ws.send(frame)
+        except Exception:
+            pass
+
+    def _ping_loop(self, stop_event):
+        while not stop_event.is_set():
+            time.sleep(self.ping_interval)
+            if self.connected:
+                self._raw("2")
+
+    def _stall_loop(self, stop_event):
+        while not stop_event.is_set():
+            time.sleep(1)
+            self.tick()
+
+    def run_forever(self, stop_event):
+        """Maintain a connection forever. Reconnects every 5s when the Pi is
+        unreachable; the stall loop and ping loop run for the whole lifetime."""
+        threading.Thread(target=self._ping_loop, args=(stop_event,), daemon=True).start()
+        threading.Thread(target=self._stall_loop, args=(stop_event,), daemon=True).start()
+        token = make_token(self.cfg.secret)
+        url = (f"ws://{self.cfg.host}:{self.cfg.port}"
+               f"/socket.io/?transport=websocket&token={token}")
+        while not stop_event.is_set():
+            ws = websocket.WebSocketApp(
+                url,
+                on_open=self._on_ws_open,
+                on_message=lambda _w, m: self.handle_frame(m),
+                on_error=lambda _w, _e: None,
+                on_close=lambda _w, _c, _m: self.mark_disconnected(),
+            )
+            ws.run_forever()
+            self.mark_disconnected()
+            if stop_event.is_set():
+                break
+            time.sleep(5)
