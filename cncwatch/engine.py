@@ -133,9 +133,54 @@ class WatchdogEngine:
             return
         self._handle_event(arr[0], arr[1:])
 
-    # event dispatch (extended in Task 3)
+    # event dispatch
     def _handle_event(self, event, args):
-        if event == "sender:status":
+        if event == "controller:state":
+            # ["controller:state", <controllerType>, <state>]
+            state = args[1] if len(args) > 1 else (args[0] if args else {})
+            self._handle_state(state)
+        elif event == "workflow:state":
+            self._on_workflow(args[0] if args else "idle")
+        elif event == "sender:status":
             s = args[0] if args and isinstance(args[0], dict) else {}
             self.sent = s.get("sent", self.sent)
             self.total = s.get("total", self.total)
+
+    def _on_workflow(self, new):
+        if new == "running" and self.workflow_state != "running":
+            # fresh job: clear stale movement history and per-job counters
+            self.last_move = self._clock()
+            self.job_active = True
+            self.recovery_attempts = 0
+            self.stalls_recovered = 0
+            self._reset_recovery()
+        # running -> idle means the drawing ended (finished or stopped). A pause
+        # is running -> "paused", so this branch won't fire on an intentional hold.
+        if new == "idle" and self.job_active:
+            self.job_active = False
+            done = bool(self.total) and self.sent >= self.total
+            self.on_job_finished("complete" if done else "stopped", self.sent, self.total)
+        self.workflow_state = new
+        self._recompute_state()
+
+    def _handle_state(self, state):
+        status = state.get("status", {}) if isinstance(state, dict) else {}
+        self.machine_state = status.get("activeState", self.machine_state)
+        mpos = status.get("mpos")
+        if mpos:
+            pos = (mpos.get("x"), mpos.get("y"), mpos.get("z"))
+            if pos != self.last_pos:
+                self.last_pos = pos
+                self.last_move = self._clock()
+                if self.await_confirm:
+                    # motion resumed after a recovery cycle -> confirmed recovery
+                    self.await_confirm = False
+                    self.recovering = False
+                    self.stalls_recovered += 1
+                    self.on_stall_recovered(self.stalls_recovered)
+                    self._recompute_state()
+
+    def _reset_recovery(self):
+        self.recovering = False
+        self.resume_sent = False
+        self.await_confirm = False
