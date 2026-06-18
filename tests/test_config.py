@@ -3,9 +3,9 @@ import os
 from cncwatch.config import Config, load_config, save_config, ensure_config_file
 
 
-def test_defaults_match_original_script():
+def test_sensible_defaults():
     c = Config()
-    assert c.host == "grbl.local"
+    assert c.host == ""          # host is required; user sets it in config
     assert c.port == 8000
     assert c.serial_port == "/dev/ttyACM0"
     assert c.stall_secs == 5.0
@@ -15,7 +15,7 @@ def test_defaults_match_original_script():
 
 def test_load_missing_file_returns_defaults(tmp_path):
     c = load_config(str(tmp_path / "nope.json"))
-    assert c.host == "grbl.local"
+    assert c == Config()
 
 
 def test_load_overrides_known_keys_only(tmp_path):

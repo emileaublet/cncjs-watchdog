@@ -92,9 +92,12 @@ class WatchdogApp(rumps.App):
         self.status_item.title = self._status_text(st)
         self.recovered_item.title = f"Stalls recovered: {self.engine.stalls_recovered}"
 
+    def _host_label(self):
+        return self.engine.cfg.host or "CNCjs"
+
     def _status_text(self, st):
         if st == State.DISCONNECTED:
-            return "Disconnected — waiting for grbl.local"
+            return f"Disconnected — waiting for {self._host_label()}"
         if st == State.IDLE:
             return "Connected — idle"
         sent, total = self.engine.sent, self.engine.total
@@ -105,11 +108,11 @@ class WatchdogApp(rumps.App):
         kind = ev[0]
         if kind == "connected":
             self.notifier.reset("disconnected")
-            self.notifier.send("CNCjs Watchdog", "", "Connected to grbl.local",
+            self.notifier.send("CNCjs Watchdog", "", f"Connected to {self._host_label()}",
                                key="connected", once=True)
         elif kind == "disconnected":
             self.notifier.reset("connected")
-            self.notifier.send("CNCjs Watchdog", "", "Lost connection to grbl.local",
+            self.notifier.send("CNCjs Watchdog", "", f"Lost connection to {self._host_label()}",
                                key="disconnected", once=True)
         elif kind == "recovered":
             self.notifier.send("CNCjs Watchdog", "Stall recovered",

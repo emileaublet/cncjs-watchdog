@@ -26,7 +26,7 @@ import jwt
 import websocket
 
 # ── config ────────────────────────────────────────────────────────────────────
-HOST           = "grbl.local"
+HOST           = ""     # hostname or IP of the machine running CNCjs — fill this in
 PORT           = 8000
 SERIAL_PORT    = "/dev/ttyACM0"
 BAUD           = 115200

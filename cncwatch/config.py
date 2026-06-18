@@ -8,7 +8,7 @@ LOG_FILE = os.path.expanduser("~/Library/Logs/cncjs-watchdog.log")
 
 @dataclass
 class Config:
-    host: str = "grbl.local"
+    host: str = ""  # hostname or IP of the machine running CNCjs — set in ~/.cncjs-watchdog.json
     port: int = 8000
     serial_port: str = "/dev/ttyACM0"
     baud: int = 115200
