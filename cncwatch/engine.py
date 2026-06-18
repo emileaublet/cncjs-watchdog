@@ -89,6 +89,7 @@ class WatchdogEngine:
         self.resume_at = 0.0
         self.recovery_attempts = 0
         self.stalls_recovered = 0
+        self._last_tick = None  # wall-clock of the previous tick; detects sleep/wake jumps
 
     # state helpers
     def _set_state(self, new):
@@ -244,8 +245,23 @@ class WatchdogEngine:
         log.warning("stall detected — pausing sender (attempt #%d)", self.recovery_attempts)
         self._recompute_state()
 
+    def _wake_gap(self):
+        # A tick gap this large means the process was suspended (system sleep),
+        # not that the machine stalled. Comfortably above stall_secs so a normal
+        # stall is never mistaken for a wake.
+        return max(30.0, self.cfg.stall_secs * 3)
+
     def tick(self):
         now = self._clock()
+        prev = self._last_tick
+        self._last_tick = now
+        # If we were frozen (Mac slept) the wall clock jumps forward. Don't read
+        # that gap as a stall — reset the movement timer and skip this cycle.
+        if prev is not None and (now - prev) > self._wake_gap():
+            self.last_move = now
+            log.info("woke after %.0fs gap — resetting stall timer", now - prev)
+            return
+
         if not self.connected:
             return
 

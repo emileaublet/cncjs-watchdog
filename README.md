@@ -51,6 +51,12 @@ Defaults live in `cncwatch/config.py`; override any of them in `~/.cncjs-watchdo
 
 Enable **Launch at login** from the menu to start it with your Mac.
 
+## Sleep
+While a job is running, the app holds a power assertion (`caffeinate`) so your Mac
+won't idle-sleep and freeze the watchdog mid-plot — it's released the moment the job
+ends, so the Mac sleeps normally when idle. It also detects wake-from-sleep and resets
+its stall timer so a long sleep can't trigger a false recovery.
+
 ## Develop
     python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
     ./venv/bin/python -m pytest          # run tests

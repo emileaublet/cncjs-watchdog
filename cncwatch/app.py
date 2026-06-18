@@ -9,6 +9,7 @@ import rumps
 from .config import load_config, ensure_config_file, CONFIG_PATH, LOG_FILE
 from .engine import WatchdogEngine, State, setup_logging
 from .notifications import Notifier
+from .sleep_guard import SleepGuard
 from . import login_item
 
 # Colored dots map to the spec's status colors:
@@ -44,6 +45,8 @@ class WatchdogApp(rumps.App):
         setup_logging()
         self.cfg = load_config()
         self.notifier = Notifier()
+        self.sleep_guard = SleepGuard()
+        self._job_was_active = False
         self.events = queue.Queue()
         self.stop_event = threading.Event()
 
@@ -91,6 +94,14 @@ class WatchdogApp(rumps.App):
         self.title = format_title(st, self.engine.sent, self.engine.total)
         self.status_item.title = self._status_text(st)
         self.recovered_item.title = f"Stalls recovered: {self.engine.stalls_recovered}"
+        # Keep the Mac awake only while a job is running, so idle sleep can't
+        # freeze the watchdog mid-plot.
+        active = self.engine.job_active
+        if active and not self._job_was_active:
+            self.sleep_guard.acquire()
+        elif not active and self._job_was_active:
+            self.sleep_guard.release()
+        self._job_was_active = active
 
     def _host_label(self):
         return self.engine.cfg.host or "CNCjs"
@@ -148,5 +159,6 @@ class WatchdogApp(rumps.App):
             sender.state = True
 
     def _quit(self, _sender):
+        self.sleep_guard.release()
         self.stop_event.set()
         rumps.quit_application()

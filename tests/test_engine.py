@@ -178,6 +178,24 @@ def test_reload_swaps_config_and_forces_reconnect():
     assert closed == [True]   # socket closed -> run_forever reconnects with new cfg
 
 
+def test_wake_from_sleep_does_not_false_stall():
+    # A huge tick gap means the Mac slept and the process was frozen — the wall
+    # clock jumped, but that's not a stall. It must reset, not recover.
+    eng, sent, clock = make_engine()
+    run_job(eng)
+    eng.tick()                # establish a baseline tick time
+    sent.clear()
+    clock.advance(600)        # ~10 min of system sleep
+    eng.tick()
+    assert sent == []                  # no spurious pause/resume
+    assert eng.state == State.RUNNING
+    assert eng.recovering is False
+    # and the timer was reset, so a genuine stall afterward still triggers
+    clock.advance(5)
+    eng.tick()
+    assert sent == ['42["command","/dev/ttyACM0","gcode:pause"]']
+
+
 def test_startup_subscribes_by_opening_port():
     # CNCjs only sends controller:state/workflow:state/sender:status to sockets
     # that have joined the port via "open". Without this, the watchdog is deaf
