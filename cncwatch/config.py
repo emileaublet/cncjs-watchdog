@@ -13,7 +13,7 @@ class Config:
     serial_port: str = "/dev/ttyACM0"
     baud: int = 115200
     controller_type: str = "Grbl"
-    secret: str = "$2a$10$EXZGL.UpR1K2z1DQuFJRpe"
+    secret: str = ""  # your CNCjs secret — set it in ~/.cncjs-watchdog.json (see README)
     stall_secs: float = 5.0
     hold_secs: float = 2.0
     confirm_secs: float = 2.0   # after resume, how long to wait for motion before re-arming
